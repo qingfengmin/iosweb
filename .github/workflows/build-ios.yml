@@ -22,22 +22,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ---- 1. 下载 uni-app x iOS SDK ----
+      # ---- 1. 缓存 SDK (第一次慢，后面秒过) ----
+      - name: Cache iOS SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: native-ios/SDK
+          key: uniappx-ios-sdk-5.07
+
       - name: Download iOS SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
           set -e
           SDK_URL="https://web-ext-storage.dcloud.net.cn/uni-app-x/sdk/iOS/UniAppX-iOS%405.07.zip"
-          echo "Downloading SDK..."
+          echo "Downloading SDK (~200MB)..."
           curl -L -o /tmp/sdk.zip "$SDK_URL"
           echo "Extracting..."
           unzip -q /tmp/sdk.zip -d native-ios/SDK
-          echo ""
-          echo "=== SDK structure ==="
-          find native-ios/SDK -maxdepth 5 -type d | sort | head -80
-          echo ""
+          rm /tmp/sdk.zip
+          echo "SDK extracted"
+
+      - name: Verify SDK
+        run: |
           echo "=== xcframeworks ==="
           find native-ios/SDK -name "*.xcframework" -maxdepth 4 | sort
-          echo ""
           echo "=== xcodeproj in SDK ==="
           find native-ios/SDK -name "*.xcodeproj" 2>/dev/null || echo "(none)"
 
