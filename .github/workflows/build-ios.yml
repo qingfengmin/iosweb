@@ -1,0 +1,171 @@
+# ============================================================
+# uni-app x iOS 云打包 — GitHub Actions 自动化构建
+# ============================================================
+# 原理: 使用 HBuilderX CLI 将项目上传到 DCloud 云端 Mac 服务器
+#       完成 iOS 编译，然后下载 IPA 产物。
+#
+# 你需要先在 GitHub 仓库 Settings → Secrets 中配置以下密钥:
+#
+#   必需 (DCloud 账号):
+#     DCLOUD_USERNAME    — DCloud 开发者中心登录用户名/邮箱
+#     DCLOUD_PASSWORD    — DCloud 开发者中心登录密码
+#
+#   必需 (Apple 开发者证书):
+#     IOS_BUNDLE_ID      — 你的 App Bundle ID, 如 com.example.iosweb
+#     IOS_CERT_PASSWORD  — .p12 证书的导出密码
+#     IOS_P12_BASE64     — .p12 证书文件的 Base64 编码
+#     IOS_PROFILE_BASE64 — .mobileprovision 描述文件的 Base64 编码
+#
+#   生成 Base64 (PowerShell):
+#     [Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.p12")) | Set-Clipboard
+#     [Convert]::ToBase64String([IO.File]::ReadAllBytes("xxx.mobileprovision")) | Set-Clipboard
+# ============================================================
+
+name: Build iOS App
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:   # 允许手动触发
+
+jobs:
+  build-ios:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      # ---- 1. 检出代码 ----
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---- 2. 缓存 HBuilderX (避免每次下载 ~500MB) ----
+      - name: Cache HBuilderX
+        id: cache-hbx
+        uses: actions/cache@v4
+        with:
+          path: C:\HBuilderX
+          key: hbuilderx-${{ hashFiles('.github/workflows/build-ios.yml') }}
+
+      - name: Download HBuilderX
+        if: steps.cache-hbx.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "正在下载 HBuilderX..."
+          $url = "https://download1.dcloud.net.cn/download/HBuilderX.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\HBuilderX.zip" -UseBasicParsing
+          Write-Host "解压中..."
+          Expand-Archive -Path "$env:RUNNER_TEMP\HBuilderX.zip" -DestinationPath "C:\HBuilderX" -Force
+          Write-Host "HBuilderX 安装完成"
+
+      # ---- 3. 解码证书文件 ----
+      - name: Decode iOS Certificates
+        shell: pwsh
+        run: |
+          # .p12 证书
+          $p12Bytes = [Convert]::FromBase64String("${{ secrets.IOS_P12_BASE64 }}")
+          [IO.File]::WriteAllBytes("${{ github.workspace }}\cert.p12", $p12Bytes)
+          Write-Host "证书文件已生成: cert.p12"
+
+          # .mobileprovision 描述文件
+          $profileBytes = [Convert]::FromBase64String("${{ secrets.IOS_PROFILE_BASE64 }}")
+          [IO.File]::WriteAllBytes("${{ github.workspace }}\profile.mobileprovision", $profileBytes)
+          Write-Host "描述文件已生成: profile.mobileprovision"
+
+      # ---- 4. 启动 HBuilderX ----
+      - name: Start HBuilderX
+        shell: pwsh
+        run: |
+          $cli = "C:\HBuilderX\cli.exe"
+          Write-Host "启动 HBuilderX..."
+          & $cli open
+          Start-Sleep -Seconds 10
+          Write-Host "HBuilderX 已启动"
+
+      # ---- 5. 登录 DCloud 账号 ----
+      - name: Login to DCloud
+        shell: pwsh
+        run: |
+          $cli = "C:\HBuilderX\cli.exe"
+          Write-Host "登录 DCloud 账号..."
+          & $cli user login --username "${{ secrets.DCLOUD_USERNAME }}" --password "${{ secrets.DCLOUD_PASSWORD }}"
+          Write-Host "登录成功"
+          Write-Host "验证登录状态..."
+          & $cli user info
+
+      # ---- 6. 云打包 iOS ----
+      - name: Cloud Package for iOS
+        shell: pwsh
+        run: |
+          $cli = "C:\HBuilderX\cli.exe"
+          $projectPath = "${{ github.workspace }}"
+
+          Write-Host "============================================"
+          Write-Host "开始 iOS 云打包"
+          Write-Host "项目路径: $projectPath"
+          Write-Host "Bundle ID: ${{ secrets.IOS_BUNDLE_ID }}"
+          Write-Host "============================================"
+
+          # 使用配置文件方式打包 (更清晰)
+          $config = @{
+            project          = $projectPath
+            platform         = "ios"
+            iscustom         = $false
+            ios              = @{
+              bundle          = "${{ secrets.IOS_BUNDLE_ID }}"
+              supporteddevice = "iPhone"
+              profile         = "$projectPath\profile.mobileprovision"
+              certfile        = "$projectPath\cert.p12"
+              certpassword    = "${{ secrets.IOS_CERT_PASSWORD }}"
+            }
+          }
+
+          $configPath = "$projectPath\pack-config.json"
+          $config | ConvertTo-Json -Depth 5 | Out-File -FilePath $configPath -Encoding utf8
+
+          Write-Host "打包配置已生成: $configPath"
+          Write-Host (Get-Content $configPath -Raw)
+
+          Write-Host ""
+          Write-Host "开始云打包 (此过程可能需要 5-20 分钟)..."
+          $output = & $cli pack --config $configPath 2>&1
+          $output | ForEach-Object { Write-Host $_ }
+
+          # 提取下载地址
+          $outputStr = $output -join "`n"
+          if ($outputStr -match '下载地址:\s*(https?://[^\s]+)') {
+            $downloadUrl = $Matches[1]
+            Write-Host ""
+            Write-Host "============================================"
+            Write-Host "打包成功! 下载地址: $downloadUrl"
+            Write-Host "============================================"
+            "DOWNLOAD_URL=$downloadUrl" | Out-File -FilePath "$env:GITHUB_ENV" -Encoding utf8 -Append
+          } else {
+            Write-Host ""
+            Write-Host "============================================"
+            Write-Host "未能从输出中提取下载地址，请检查上方日志"
+            Write-Host "============================================"
+            exit 1
+          }
+
+      # ---- 7. 下载 IPA ----
+      - name: Download IPA
+        shell: pwsh
+        run: |
+          $downloadUrl = "${{ env.DOWNLOAD_URL }}"
+          if (-not $downloadUrl -or $downloadUrl -eq "") {
+            Write-Host "没有找到下载地址，跳过下载步骤"
+            exit 1
+          }
+
+          Write-Host "正在下载 IPA..."
+          Invoke-WebRequest -Uri $downloadUrl -OutFile "${{ github.workspace }}\iosweb.ipa" -UseBasicParsing
+          Write-Host "IPA 下载完成: ${{ github.workspace }}\iosweb.ipa"
+
+      # ---- 8. 上传 IPA 为 GitHub Artifact ----
+      - name: Upload IPA Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iosweb-${{ github.run_number }}.ipa
+          path: "*.ipa"
+          retention-days: 7

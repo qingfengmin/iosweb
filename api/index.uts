@@ -1,0 +1,27 @@
+const BASE_URL = "http://localhost:8000"
+
+export function chatWithAI(message : string) : Promise<string> {
+	return new Promise<string>((resolve, reject) => {
+		uni.request({
+			url: BASE_URL + "/api/chat",
+			method: "POST",
+			data: {
+				message: message
+			},
+			header: {
+				"Content-Type": "application/json"
+			},
+			success: (res) => {
+				if (res.statusCode === 200 && res.data != null) {
+					const data = res.data as { response?: string; message?: string }
+					resolve(data.response || data.message || "收到你的消息了")
+				} else {
+					reject(new Error("请求失败"))
+				}
+			},
+			fail: (err) => {
+				reject(err)
+			}
+		})
+	})
+}

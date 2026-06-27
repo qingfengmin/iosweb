@@ -1,0 +1,1436 @@
+<template>
+	<view class="chat-page">
+		<!-- 头部 -->
+		<view class="header">
+			<view class="header-left">
+				<view class="brand-icon">
+					<text class="brand-text">AI</text>
+				</view>
+				<text class="brand-name">AI 助手</text>
+			</view>
+			<view class="header-right">
+				<view class="mcp-toggle" :class="{ active: mcpOpen }" @tap="toggleMcp">
+					<text class="mcp-dot">⚡</text>
+					<text class="mcp-label">MCP</text>
+					<view class="tool-count" v-if="activeToolCount > 0">{{ activeToolCount }}</view>
+				</view>
+				<view class="sidebar-toggle" @tap="toggleSidebar">
+					<text class="menu-icon">☰</text>
+				</view>
+			</view>
+		</view>
+
+		<view class="content-area">
+			<!-- 侧边栏遮罩 -->
+			<view class="sidebar-overlay" v-if="showSidebar" @tap="toggleSidebar"></view>
+
+			<!-- 侧边栏 - 历史会话 -->
+			<view class="sidebar" :class="{ open: showSidebar }">
+				<view class="sidebar-header">
+					<text class="sidebar-title">会话历史</text>
+					<view class="new-chat-btn" @tap="startNewChat">
+						<text class="new-chat-icon">✕</text>
+					</view>
+				</view>
+				<scroll-view class="sidebar-list" scroll-y>
+					<view v-for="(session, idx) in historySessions" :key="idx" class="session-item" :class="{ active: session.session_id === sessionId }" @tap="loadSession(idx)">
+						<view class="session-info">
+							<text class="session-title">{{ session.title }}</text>
+							<text class="session-time">{{ session.time }}</text>
+						</view>
+						<view class="session-delete" @tap.stop="deleteSession(idx)">
+							<text class="delete-icon">🗑</text>
+						</view>
+					</view>
+					<view v-if="historySessions.length === 0" class="sidebar-empty">
+						<text class="empty-text">暂无历史记录</text>
+					</view>
+				</scroll-view>
+			</view>
+
+			<!-- MCP 面板 -->
+			<view class="mcp-panel" v-if="mcpOpen">
+				<view class="mcp-header">
+					<text class="mcp-title">MCP 服务器</text>
+					<text class="mcp-subtitle">JSON 驱动 · 可扩展</text>
+				</view>
+				<scroll-view class="mcp-list" scroll-y>
+					<view v-for="(srv, idx) in mcpServers" :key="srv.name" class="mcp-server-item">
+						<view class="mcp-server-row">
+							<view class="mcp-dot-status" :class="{ connected: srv.connected && srv.enabled }"></view>
+							<view class="mcp-server-info">
+								<text class="mcp-server-name">{{ srv.name }}</text>
+								<text class="mcp-server-cmd">{{ srv.command }} {{ (srv.args || []).join(' ') }}</text>
+							</view>
+							<view class="mcp-toggle-switch" :class="{ on: srv.enabled }" @tap="toggleServer(idx)">
+								<view class="toggle-knob"></view>
+							</view>
+						</view>
+						<view class="mcp-cwd-row">
+							<text class="mcp-cwd-label">工作目录</text>
+							<input
+								class="mcp-cwd-input"
+								:value="srv.cwd || '.'"
+								@change="updateCwd(idx, $event.target.value)"
+								placeholder="."
+							/>
+						</view>
+						<view v-if="srv.enabled && srv.connected && getToolCount(srv) > 0" class="mcp-tools">
+							<view v-for="(enabled, toolName) in srv.tools" :key="toolName" class="mcp-tool-item" @tap="toggleTool(idx, toolName, !enabled)">
+								<text class="mcp-tool-check">{{ enabled ? '☑' : '☐' }}</text>
+								<text class="mcp-tool-name" :class="{ disabled: !enabled }">{{ toolName }}</text>
+							</view>
+						</view>
+					</view>
+					<view v-if="mcpServers.length === 0" class="mcp-empty">
+						<text class="mcp-empty-text">暂无 MCP 服务器</text>
+						<text class="mcp-empty-sub">编辑 mcp_config.json 添加</text>
+					</view>
+				</scroll-view>
+			</view>
+
+			<!-- 聊天内容 -->
+			<scroll-view class="chat-scroll" scroll-y :scroll-top="scrollTop" scroll-with-animation>
+				<view v-if="messageList.length === 0" class="welcome-screen">
+					<view class="logo-wrap">
+						<view class="ring ring-1"></view>
+						<view class="ring ring-2"></view>
+						<view class="ring ring-3"></view>
+						<view class="logo-dot"></view>
+					</view>
+					<text class="welcome-title">有什么我可以帮你的？</text>
+					<text class="welcome-sub">左侧查看历史会话 · MCP 面板开启工具</text>
+
+					<view class="suggestions">
+						<view class="suggestion-btn" @tap="quickSend('帮我用Python写一个排序函数')">
+							<text class="sug-emoji">💻</text>
+							<text class="sug-text">写代码</text>
+						</view>
+						<view class="suggestion-btn" @tap="quickSend('用简单的语言解释什么是机器学习')">
+							<text class="sug-emoji">🧠</text>
+							<text class="sug-text">学知识</text>
+						</view>
+						<view class="suggestion-btn" @tap="quickSend('帮我总结一段文字的核心要点')">
+							<text class="sug-emoji">📄</text>
+							<text class="sug-text">总结内容</text>
+						</view>
+						<view class="suggestion-btn" @tap="quickSend('帮我头脑风暴一个新项目的想法')">
+							<text class="sug-emoji">💡</text>
+							<text class="sug-text">头脑风暴</text>
+						</view>
+					</view>
+				</view>
+
+				<view v-for="(msg, index) in messageList" :key="index" :id="'msg-' + index">
+					<view class="message" :class="msg.role">
+						<view v-if="msg.role === 'user'" class="avatar-user">
+							<text class="avatar-text">我</text>
+						</view>
+						<view v-else class="avatar-ai">
+							<text class="avatar-text-ai">AI</text>
+						</view>
+						<view class="msg-content">
+							<view class="msg-bubble" :class="msg.role === 'user' ? 'bubble-user' : 'bubble-ai'">
+								<view v-for="(block, bi) in msg.blocks" :key="bi">
+									<view v-if="block.type === 'code'" class="code-block">
+										<view class="code-header" v-if="block.lang">
+											<text class="code-lang">{{ block.lang }}</text>
+										</view>
+										<text class="code-text">{{ block.text }}</text>
+									</view>
+									<text v-else class="plain-text" :class="msg.role === 'user' ? 'text-white' : 'text-dark'">{{ block.text }}</text>
+								</view>
+							</view>
+							<text class="msg-time">{{ msg.time }}</text>
+						</view>
+					</view>
+				</view>
+			</scroll-view>
+		</view>
+
+		<!-- 输入区域 -->
+		<view class="input-wrapper" :style="{ paddingBottom: keyboardBottom + 'px' }">
+			<view class="skill-dropdown-menu" v-if="showSkillDropdown">
+				<view class="skill-option" @tap="useSkill('使用技能：系统健康检查')">
+					<text class="skill-option-icon">🩺</text>
+					<view class="skill-option-info">
+						<text class="skill-option-name">系统健康检查</text>
+						<text class="skill-option-desc">检查服务器状态、CPU、内存、磁盘</text>
+					</view>
+				</view>
+				<view class="skill-option" @tap="useSkill('使用技能：脚本编写助手')">
+					<text class="skill-option-icon">📝</text>
+					<view class="skill-option-info">
+						<text class="skill-option-name">脚本编写助手</text>
+						<text class="skill-option-desc">帮助编写各种运维脚本</text>
+					</view>
+				</view>
+			</view>
+			<view class="skill-bar">
+				<view class="skill-btn" @tap="toggleSkillDropdown">
+					<text class="skill-emoji">🛠️</text>
+					<text class="skill-label">使用技能</text>
+					<text class="skill-arrow" :class="{ open: showSkillDropdown }">▼</text>
+				</view>
+				<view class="skill-btn" @tap="summarizeToKnowledge">
+					<text class="skill-emoji">📚</text>
+					<text class="skill-label">知识库总结</text>
+				</view>
+			</view>
+			<view class="input-container">
+				<input
+					class="input-box"
+					v-model="inputText"
+					placeholder="输入你的消息..."
+					placeholder-class="input-placeholder"
+					confirm-type="send"
+					adjust-position="false"
+					@confirm="handleSend"
+				/>
+				<view class="send-btn" :class="{ active: inputText.trim() !== '' }" @tap="handleSend">
+					<text class="send-arrow">➤</text>
+				</view>
+			</view>
+			<text class="input-hint">Enter 发送 · Shift+Enter 换行</text>
+		</view>
+	</view>
+</template>
+
+<script setup lang="uts">
+	type MsgBlock = { type: string; text: string; lang?: string }
+	type ChatMsg = { role: string; content: string; time: string; blocks: Array<MsgBlock> }
+
+	const messageList = ref<Array<ChatMsg>>([])
+	const inputText = ref('')
+	const scrollTop = ref(99999)
+	function scrollToBottom() {
+		scrollTop.value = scrollTop.value > 99998 ? scrollTop.value + 1 : 99999
+	}
+	const keyboardBottom = ref(0)
+	const mcpOpen = ref(false)
+	const apiBase = ref('http://192.168.123.2:8000')
+	const showSidebar = ref(false)
+	const showSkillDropdown = ref(false)
+	const isFirstMessage = ref(true)
+	const sessionId = ref('')
+	const mcpServers = ref<Array<any>>([])
+	const historySessions = ref<Array<{ session_id: string; title: string; time: string }>>([])
+	const activeToolCount = ref(0)
+
+	const keyboardCallback = (res : { height : number }) => {
+		keyboardBottom.value = res.height
+	}
+	uni.onKeyboardHeightChange(keyboardCallback)
+
+	function getTimeStr() {
+		const now = new Date()
+		const h = now.getHours().toString().padStart(2, '0')
+		const m = now.getMinutes().toString().padStart(2, '0')
+		return h + ':' + m
+	}
+
+	function parseBlocks(text: string): Array<MsgBlock> {
+		const result: Array<MsgBlock> = []
+		const lines = text.split('\n')
+		let i = 0
+		while (i < lines.length) {
+			const line = lines[i]
+			if (line.startsWith('```')) {
+				const lang = line.slice(3).trim()
+				i++
+				let codeText = ''
+				while (i < lines.length && !lines[i].startsWith('```')) {
+					if (codeText !== '') codeText += '\n'
+					codeText += lines[i]
+					i++
+				}
+				if (codeText !== '') {
+					result.push({ type: 'code', text: codeText, lang: lang !== '' ? lang : undefined })
+				}
+				if (i < lines.length && lines[i].startsWith('```')) {
+					i++
+				}
+			} else {
+				let plainLines: Array<string> = []
+				while (i < lines.length && !lines[i].startsWith('```')) {
+					plainLines.push(lines[i])
+					i++
+				}
+				const plain = plainLines.join('\n')
+				if (plain.trim() !== '') {
+					result.push({ type: 'text', text: plain })
+				} else if (plain !== '') {
+					result.push({ type: 'text', text: plain })
+				}
+			}
+		}
+		if (result.length === 0) {
+			result.push({ type: 'text', text: text })
+		}
+		return result
+	}
+
+	function makeMsg(role: string, content: string): ChatMsg {
+		return {
+			role: role,
+			content: content,
+			time: getTimeStr(),
+			blocks: parseBlocks(content)
+		}
+	}
+
+	// ============ API 调用 ============
+
+	function apiRequest(url: string, method: string, body?: any): Promise<any> {
+		return new Promise<any>((resolve, reject) => {
+			const opt: any = {
+				url: apiBase.value + url,
+				method: method,
+				header: { 'Content-Type': 'application/json' },
+				success: (res: any) => {
+					if (res.statusCode >= 200 && res.statusCode < 300) {
+						resolve(res.data)
+					} else {
+						reject(new Error('HTTP ' + res.statusCode))
+					}
+				},
+				fail: (err: any) => {
+					reject(err)
+				}
+			}
+			if (body !== undefined) {
+				opt.data = body
+			}
+			uni.request(opt)
+		})
+	}
+
+	// 获取会话列表
+	function fetchSessions() {
+		apiRequest('/api/chat/sessions', 'GET').then((data: any) => {
+			const list = data.sessions || []
+			historySessions.value = list.map((s: any) => ({
+				session_id: s.session_id || s.id || '',
+				title: s.title || '新会话',
+				time: s.updated_at || s.created_at || ''
+			}))
+		}).catch((e: any) => {
+			console.log('fetch sessions error:', e)
+		})
+	}
+
+	// 创建会话
+	function createSessionOnServer(): Promise<string> {
+		return new Promise<string>((resolve, reject) => {
+			apiRequest('/api/chat/sessions', 'POST').then((data: any) => {
+				if (data.session_id || data.id) {
+					resolve(data.session_id || data.id)
+				} else {
+					resolve('')
+				}
+			}).catch((e: any) => {
+				reject(e)
+			})
+		})
+	}
+
+	// 加载会话消息
+	function loadSessionMessages(sid: string) {
+
+		apiRequest('/api/chat/sessions/' + sid + '/messages', 'GET').then((data: any) => {
+			const raw: Array<any> = data.messages || []
+			const newMsgs: Array<ChatMsg> = []
+			for (let i = 0; i < raw.length; i++) {
+				const m = raw[i]
+				const r = m.role || 'user'
+				const role = (r === 'assistant' || r === 'ai') ? 'ai' : 'user'
+				newMsgs.push(makeMsg(role, m.content || ''))
+			}
+			messageList.value = newMsgs
+			isFirstMessage.value = false
+			setTimeout(() => {
+				scrollToBottom()
+			}, 200)
+		}).catch((e: any) => {
+			messageList.value = [makeMsg('ai', '加载历史消息失败')]
+			isFirstMessage.value = false
+		})
+	}
+
+	// 删除会话
+	function deleteSessionOnServer(sid: string): Promise<any> {
+		return apiRequest('/api/chat/sessions/' + sid, 'DELETE')
+	}
+
+	// 获取 MCP 服务器列表
+	function fetchMcpServers() {
+		apiRequest('/api/mcp/servers', 'GET').then((data: any) => {
+			mcpServers.value = data.servers || []
+			updateToolCount()
+		}).catch((e: any) => {
+			console.log('fetch mcp error:', e)
+		})
+	}
+
+	function updateToolCount() {
+		let count = 0
+		for (const srv of mcpServers.value) {
+			if (srv.enabled && srv.connected) {
+				const tools = srv.tools || {}
+				for (const k in tools) {
+					if (tools[k]) count++
+				}
+			}
+		}
+		activeToolCount.value = count
+	}
+
+	// ============ UI 事件 ============
+
+	onLoad((option) => {
+		if (option && option.apiBase) {
+			apiBase.value = option.apiBase
+		}
+		fetchSessions()
+	})
+
+	function toggleMcp() {
+		mcpOpen.value = !mcpOpen.value
+		if (mcpOpen.value) {
+			fetchMcpServers()
+		}
+	}
+
+	function toggleSidebar() {
+		showSidebar.value = !showSidebar.value
+		if (showSidebar.value) {
+			fetchSessions()
+		}
+	}
+
+	function toggleSkillDropdown() {
+		showSkillDropdown.value = !showSkillDropdown.value
+	}
+
+	function startNewChat() {
+		messageList.value = []
+		sessionId.value = ''
+		isFirstMessage.value = true
+		showSidebar.value = false
+	}
+
+	function loadSession(idx: number) {
+		const session = historySessions.value[idx]
+		if (!session || !session.session_id) return
+		sessionId.value = session.session_id
+		isFirstMessage.value = false
+		showSidebar.value = false
+		loadSessionMessages(session.session_id)
+	}
+
+	function deleteSession(idx: number) {
+		const session = historySessions.value[idx]
+		if (!session || !session.session_id) return
+		deleteSessionOnServer(session.session_id).then(() => {
+			if (sessionId.value === session.session_id) {
+				sessionId.value = ''
+				isFirstMessage.value = true
+				messageList.value = []
+			}
+			fetchSessions()
+		}).catch((e: any) => {
+			console.log('delete error:', e)
+		})
+	}
+
+	function addMsg(msg: ChatMsg) {
+		const newMsgs: Array<ChatMsg> = []
+		for (let i = 0; i < messageList.value.length; i++) {
+			newMsgs.push(messageList.value[i])
+		}
+		newMsgs.push(msg)
+		messageList.value = newMsgs
+		scrollToBottom()
+	}
+
+	function quickSend(text: string) {
+		inputText.value = text
+	}
+
+	function useSkill(text: string) {
+		showSkillDropdown.value = false
+		inputText.value = text
+	}
+
+	function summarizeToKnowledge() {
+		if (messageList.value.length === 0) {
+			uni.showToast({ title: '当前会话没有消息，无法总结', icon: 'none' })
+			return
+		}
+		inputText.value = '请使用 save_conversation_as_knowledge 工具总结当前对话并保存到知识库'
+	}
+
+	// ============ 切换 MCP 服务器 ============
+
+	function getToolCount(srv: any): number {
+		const tools = srv.tools || {}
+		let n = 0
+		for (const k in tools) {
+			if (tools[k]) n++
+		}
+		return n
+	}
+
+	function toggleServer(idx: number) {
+		const srv = mcpServers.value[idx]
+		if (!srv) return
+		apiRequest('/api/mcp/server/toggle?name=' + encodeURIComponent(srv.name) + '&enabled=' + (!srv.enabled), 'POST').then((data: any) => {
+			if (data.success) {
+				mcpServers.value[idx] = data.server
+				updateToolCount()
+			}
+		}).catch((e: any) => {
+			uni.showToast({ title: '切换失败', icon: 'none' })
+		})
+	}
+
+	function toggleTool(srvIdx: number, toolName: string, enabled: boolean) {
+		const srv = mcpServers.value[srvIdx]
+		if (!srv) return
+		apiRequest('/api/mcp/tool/toggle', 'POST', {
+			server_name: srv.name,
+			tool_name: toolName,
+			enabled: enabled
+		}).then((data: any) => {
+			if (data.success) {
+				mcpServers.value[srvIdx] = data.server
+				updateToolCount()
+			}
+		}).catch((e: any) => {
+			console.log('toggle tool error:', e)
+		})
+	}
+
+	function updateCwd(srvIdx: number, cwd: string) {
+		const srv = mcpServers.value[srvIdx]
+		if (!srv) return
+		apiRequest('/api/mcp/server/cwd', 'POST', {
+			name: srv.name,
+			cwd: cwd
+		}).then((data: any) => {
+			if (data.success) {
+				mcpServers.value[srvIdx] = data.server
+			}
+		}).catch((e: any) => {
+			console.log('update cwd error:', e)
+		})
+	}
+
+	// ============ 发送消息（SSE） ============
+
+	function handleSend() {
+		const text = inputText.value.trim()
+		if (text === '') return
+
+		addMsg(makeMsg('user', text))
+		inputText.value = ''
+
+		const aiMsgIdx = messageList.value.length
+		addMsg(makeMsg('ai', ''))
+
+		function parseSSE(fullText: string): string {
+			const chunks = fullText.split('\n\n')
+			let collected = ''
+			for (let i = 0; i < chunks.length; i++) {
+				const event = chunks[i].trim()
+				if (!event) continue
+				const lines = event.split('\n')
+				for (let j = 0; j < lines.length; j++) {
+					const line = lines[j]
+					if (line.startsWith('data: ')) {
+						const payload = line.slice(6)
+						if (payload === '[DONE]') continue
+						try {
+							const obj = JSON.parse(payload)
+							if (obj.text) collected += obj.text
+						} catch (e) {
+							if (!payload.startsWith('[THINKING]')) {
+								collected += payload
+							}
+						}
+					} else if (line.startsWith('data:')) {
+						const payload = line.slice(5).trim()
+						if (payload === '[DONE]' || !payload) continue
+						try {
+							const obj = JSON.parse(payload)
+							if (obj.text) collected += obj.text
+						} catch (e) {
+							if (!payload.startsWith('[THINKING]')) {
+								collected += payload
+							}
+						}
+					}
+				}
+			}
+			return collected
+		}
+
+		const doSend = (sid: string) => {
+			sessionId.value = sid
+
+			uni.request({
+				url: apiBase.value + '/chat',
+				method: 'POST',
+				header: { 'Content-Type': 'application/json' },
+				data: { message: text, session_id: sid },
+				success: (res: any) => {
+					let rawBody = ''
+					if (typeof res.data === 'string') {
+						rawBody = res.data
+					} else if (res.data) {
+						rawBody = JSON.stringify(res.data)
+					}
+					let collected = parseSSE(rawBody)
+					if (collected === '' && rawBody) {
+						collected = rawBody
+					}
+					if (collected === '') {
+						collected = '（后端无内容返回）'
+					}
+					if (aiMsgIdx < messageList.value.length) {
+						messageList.value[aiMsgIdx] = makeMsg('ai', collected)
+						const arr = messageList.value
+						arr.splice(0, 0)
+						messageList.value = arr
+						scrollToBottom()
+					}
+					fetchSessions()
+				},
+				fail: (err: any) => {
+					if (aiMsgIdx < messageList.value.length) {
+						messageList.value[aiMsgIdx] = makeMsg('ai', '连接服务器失败，请检查网络或后端服务是否启动')
+						const arr = messageList.value
+						arr.splice(0, 0)
+						messageList.value = arr
+						scrollToBottom()
+					}
+				}
+			})
+		}
+
+		if (!sessionId.value) {
+			createSessionOnServer().then((sid) => {
+				if (sid) {
+					isFirstMessage.value = false
+					doSend(sid)
+				} else {
+					doSend('')
+				}
+			}).catch(() => {
+				doSend('')
+			})
+		} else {
+			doSend(sessionId.value)
+		}
+	}
+</script>
+
+<style>
+	.chat-page {
+		display: flex;
+		flex-direction: column;
+		width: 750rpx;
+		height: 100%;
+		background-color: #1a1d28;
+	}
+
+	.header {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		width: 750rpx;
+		padding: 24rpx 32rpx;
+		background-color: #22263a;
+		border-bottom: 2rpx solid #33384d;
+	}
+
+	.header-left {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.brand-icon {
+		width: 64rpx;
+		height: 64rpx;
+		border-radius: 16rpx;
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.brand-text {
+		color: #ffffff;
+		font-size: 28rpx;
+		font-weight: 700;
+	}
+
+	.brand-name {
+		font-size: 34rpx;
+		font-weight: 600;
+		color: #e8eaed;
+		margin-left: 24rpx;
+	}
+
+	.header-right {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.mcp-toggle {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		background-color: #2a2e42;
+		border: 2rpx solid #383d54;
+		border-radius: 40rpx;
+		padding: 16rpx 32rpx;
+	}
+
+	.mcp-toggle.active {
+		border-color: #818cf8;
+	}
+
+	.mcp-dot {
+		font-size: 28rpx;
+		margin-right: 12rpx;
+	}
+
+	.mcp-label {
+		color: #9ca3b8;
+		font-size: 28rpx;
+	}
+
+	.mcp-toggle.active .mcp-label {
+		color: #818cf8;
+	}
+
+	.tool-count {
+		color: #ffffff;
+		background-color: #10b981;
+		border-radius: 20rpx;
+		padding: 4rpx 16rpx;
+		font-size: 22rpx;
+		font-weight: 700;
+	}
+
+	.sidebar-toggle {
+		width: 64rpx;
+		height: 64rpx;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-left: 20rpx;
+	}
+
+	.menu-icon {
+		font-size: 40rpx;
+		color: #9ca3b8;
+	}
+
+	.content-area {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		width: 750rpx;
+		min-height: 0;
+		overflow: hidden;
+		position: relative;
+	}
+
+	.sidebar-overlay {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 750rpx;
+		height: 100%;
+		background-color: rgba(0, 0, 0, 0.5);
+		z-index: 90;
+	}
+
+	.sidebar {
+		position: absolute;
+		top: 0;
+		left: -560rpx;
+		width: 560rpx;
+		height: 100%;
+		background-color: #1c1f30;
+		border-right: 2rpx solid #33384d;
+		z-index: 100;
+		display: flex;
+		flex-direction: column;
+		transition: left 0.3s;
+	}
+
+	.sidebar.open {
+		left: 0;
+	}
+
+	.sidebar-header {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: space-between;
+		padding: 32rpx;
+		border-bottom: 2rpx solid #33384d;
+	}
+
+	.sidebar-title {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #e8eaed;
+	}
+
+	.new-chat-btn {
+		width: 64rpx;
+		height: 64rpx;
+		border-radius: 16rpx;
+		background-color: #6366f1;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+	}
+
+	.new-chat-icon {
+		font-size: 36rpx;
+		color: #ffffff;
+	}
+
+	.sidebar-list {
+		flex: 1;
+		padding: 16rpx;
+	}
+
+	.session-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding: 20rpx 24rpx;
+		margin-bottom: 4rpx;
+		border-radius: 16rpx;
+	}
+
+	.session-item.active {
+		background-color: rgba(99, 102, 241, 0.15);
+		border: 2rpx solid rgba(99, 102, 241, 0.3);
+	}
+
+	.session-info {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.session-title {
+		font-size: 26rpx;
+		color: #e8eaed;
+		font-weight: 500;
+		margin-bottom: 4rpx;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		overflow: hidden;
+	}
+
+	.session-time {
+		font-size: 22rpx;
+		color: #7a80a0;
+	}
+
+	.session-delete {
+		width: 48rpx;
+		height: 48rpx;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+	}
+
+	.delete-icon {
+		font-size: 32rpx;
+	}
+
+	.sidebar-empty {
+		padding: 80rpx 32rpx;
+		text-align: center;
+	}
+
+	.empty-text {
+		font-size: 26rpx;
+		color: #7a80a0;
+	}
+
+	/* ===== MCP 面板 ===== */
+
+	.mcp-panel {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 560rpx;
+		height: 100%;
+		background-color: #22263a;
+		border-right: 2rpx solid #33384d;
+		z-index: 80;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.mcp-header {
+		padding: 24rpx 32rpx 16rpx;
+		border-bottom: 2rpx solid #33384d;
+	}
+
+	.mcp-title {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #e8eaed;
+		margin-bottom: 6rpx;
+	}
+
+	.mcp-subtitle {
+		font-size: 24rpx;
+		color: #9ca3b8;
+	}
+
+	.mcp-list {
+		flex: 1;
+		padding: 16rpx;
+	}
+
+	.mcp-server-item {
+		background-color: #2a2e42;
+		border: 2rpx solid #383d54;
+		border-radius: 24rpx;
+		padding: 24rpx;
+		margin-bottom: 16rpx;
+	}
+
+	.mcp-server-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+	}
+
+	.mcp-dot-status {
+		width: 16rpx;
+		height: 16rpx;
+		border-radius: 8rpx;
+		background-color: #7a80a0;
+		flex-shrink: 0;
+		margin-right: 16rpx;
+	}
+
+	.mcp-dot-status.connected {
+		background-color: #10b981;
+	}
+
+	.mcp-server-info {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.mcp-server-name {
+		font-size: 26rpx;
+		font-weight: 600;
+		color: #e8eaed;
+		margin-bottom: 4rpx;
+	}
+
+	.mcp-server-cmd {
+		font-size: 22rpx;
+		color: #9ca3b8;
+		text-overflow: ellipsis;
+		overflow: hidden;
+		white-space: nowrap;
+	}
+
+	.mcp-toggle-switch {
+		width: 80rpx;
+		height: 44rpx;
+		border-radius: 22rpx;
+		background-color: #383d54;
+		position: relative;
+		flex-shrink: 0;
+	}
+
+	.mcp-toggle-switch.on {
+		background-color: #6366f1;
+	}
+
+	.toggle-knob {
+		width: 36rpx;
+		height: 36rpx;
+		border-radius: 18rpx;
+		background-color: #ffffff;
+		position: absolute;
+		top: 4rpx;
+		left: 4rpx;
+		transition: left 0.2s;
+	}
+
+	.mcp-toggle-switch.on .toggle-knob {
+		left: 40rpx;
+	}
+
+	.mcp-cwd-row {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		margin-top: 16rpx;
+		padding-top: 16rpx;
+		border-top: 2rpx solid #2a2e38;
+	}
+
+	.mcp-cwd-label {
+		font-size: 22rpx;
+		color: #8b8fa3;
+		flex-shrink: 0;
+		margin-right: 12rpx;
+	}
+
+	.mcp-cwd-input {
+		flex: 1;
+		height: 56rpx;
+		background-color: #0f1117;
+		border: 2rpx solid #2a2e38;
+		border-radius: 12rpx;
+		color: #e4e6eb;
+		font-size: 22rpx;
+		padding-left: 16rpx;
+	}
+
+	.mcp-tools {
+		margin-top: 16rpx;
+		padding-top: 12rpx;
+		border-top: 2rpx solid #2a2e38;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.mcp-tool-item {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding: 12rpx 16rpx;
+		border-radius: 12rpx;
+		margin-bottom: 8rpx;
+	}
+
+	.mcp-tool-check {
+		font-size: 32rpx;
+		margin-right: 12rpx;
+	}
+
+	.mcp-tool-name {
+		font-size: 24rpx;
+		color: #e4e6eb;
+	}
+
+	.mcp-tool-name.disabled {
+		color: #6b6f82;
+	}
+
+	.mcp-empty {
+		padding: 80rpx 32rpx;
+		text-align: center;
+	}
+
+	.mcp-empty-text {
+		font-size: 26rpx;
+		color: #6b6f82;
+	}
+
+	.mcp-empty-sub {
+		font-size: 22rpx;
+		color: #6b6f82;
+		margin-top: 8rpx;
+	}
+
+	/* ===== 聊天区域 ===== */
+
+	.chat-scroll {
+		flex: 1;
+		width: 750rpx;
+		padding-bottom: 200rpx;
+	}
+
+	.welcome-screen {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		width: 750rpx;
+		padding-top: 60rpx;
+		padding-bottom: 40rpx;
+	}
+
+	.logo-wrap {
+		width: 260rpx;
+		height: 260rpx;
+		position: relative;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		margin-bottom: 60rpx;
+	}
+
+	.ring {
+		position: absolute;
+		border-radius: 130rpx;
+		border: 4rpx dashed #3b82f6;
+	}
+
+	.ring-1 {
+		width: 260rpx;
+		height: 260rpx;
+	}
+
+	.ring-2 {
+		width: 200rpx;
+		height: 200rpx;
+	}
+
+	.ring-3 {
+		width: 140rpx;
+		height: 140rpx;
+	}
+
+	.logo-dot {
+		width: 60rpx;
+		height: 60rpx;
+		border-radius: 30rpx;
+		background-color: #3b82f6;
+	}
+
+	.welcome-title {
+		font-size: 56rpx;
+		font-weight: 700;
+		color: #ffffff;
+		margin-bottom: 16rpx;
+	}
+
+	.welcome-sub {
+		font-size: 28rpx;
+		color: #9ca3b8;
+		margin-bottom: 60rpx;
+	}
+
+	.suggestions {
+		display: flex;
+		flex-wrap: wrap;
+		flex-direction: row;
+		width: 640rpx;
+		justify-content: space-between;
+		margin-bottom: 20rpx;
+	}
+
+	.suggestion-btn {
+		width: 310rpx;
+		height: 120rpx;
+		background-color: #22263a;
+		border: 2rpx solid #33384d;
+		border-radius: 24rpx;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding-left: 28rpx;
+		padding-right: 28rpx;
+		margin-bottom: 16rpx;
+	}
+
+	.sug-emoji {
+		font-size: 44rpx;
+		margin-right: 20rpx;
+	}
+
+	.sug-text {
+		font-size: 30rpx;
+		color: #e8eaed;
+	}
+
+	/* ===== 消息区 ===== */
+
+	.message {
+		display: flex;
+		flex-direction: row;
+		padding-top: 28rpx;
+		padding-left: 32rpx;
+		padding-right: 32rpx;
+		width: 750rpx;
+	}
+
+	.message.user {
+		flex-direction: row-reverse;
+	}
+
+	.avatar-user {
+		width: 80rpx;
+		height: 80rpx;
+		border-radius: 40rpx;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		margin-right: 24rpx;
+	}
+
+	.avatar-ai {
+		width: 80rpx;
+		height: 80rpx;
+		border-radius: 40rpx;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		background-color: #f3f4f6;
+		border: 2rpx solid #d1d5db;
+		margin-right: 24rpx;
+	}
+
+	.avatar-text {
+		color: #ffffff;
+		font-size: 28rpx;
+		font-weight: 500;
+	}
+
+	.avatar-text-ai {
+		color: #6366f1;
+		font-size: 28rpx;
+		font-weight: 500;
+	}
+
+	.msg-content {
+		flex: 1;
+	}
+
+	.msg-bubble {
+		border-radius: 32rpx;
+		padding: 28rpx 36rpx;
+	}
+
+	.bubble-user {
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+		border-bottom-right-radius: 8rpx;
+	}
+
+	.bubble-ai {
+		background-color: #ffffff;
+		border: 2rpx solid #d1d5db;
+		border-bottom-left-radius: 8rpx;
+	}
+
+	.plain-text {
+		font-size: 30rpx;
+		line-height: 1.6;
+	}
+
+	.text-dark {
+		color: #1f2937;
+	}
+
+	.text-white {
+		color: #ffffff;
+	}
+
+	.code-block {
+		background-color: #0f1117;
+		border: 2rpx solid #3b3f54;
+		border-radius: 16rpx;
+		margin: 16rpx 0;
+		padding: 4rpx 0 0 0;
+		overflow: hidden;
+	}
+
+	.code-header {
+		padding: 12rpx 24rpx;
+		border-bottom: 2rpx solid #3b3f54;
+		background-color: #1a1d28;
+	}
+
+	.code-lang {
+		font-size: 22rpx;
+		color: #6b6f82;
+	}
+
+	.code-text {
+		font-size: 26rpx;
+		line-height: 1.7;
+		color: #d4d4d8;
+		padding: 20rpx 24rpx;
+	}
+
+	.msg-time {
+		font-size: 24rpx;
+		color: #9ca3b8;
+		margin-top: 12rpx;
+		padding-left: 8rpx;
+	}
+
+	/* ===== 技能按钮条 ===== */
+
+	.skill-bar {
+		display: flex;
+		flex-direction: row;
+		padding: 4rpx 0 16rpx;
+	}
+
+	.skill-btn {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		background-color: #22263a;
+		border: 2rpx solid #33384d;
+		border-radius: 20rpx;
+		padding: 16rpx 28rpx;
+		margin-right: 16rpx;
+	}
+
+	.skill-emoji {
+		font-size: 28rpx;
+		margin-right: 12rpx;
+	}
+
+	.skill-label {
+		font-size: 26rpx;
+		color: #9ca3b8;
+	}
+
+	.skill-arrow {
+		font-size: 24rpx;
+		color: #9ca3b8;
+		margin-left: 4rpx;
+		transition: transform 0.2s;
+	}
+
+	.skill-arrow.open {
+		transform: rotate(180deg);
+	}
+
+	.skill-dropdown-menu {
+		width: 686rpx;
+		background-color: #2a2e42;
+		border: 2rpx solid #383d54;
+		border-radius: 24rpx;
+		padding: 12rpx;
+		margin-bottom: 12rpx;
+	}
+
+	.skill-option {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		padding: 20rpx 24rpx;
+		border-radius: 16rpx;
+	}
+
+	.skill-option-icon {
+		font-size: 40rpx;
+		width: 64rpx;
+		height: 64rpx;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		background-color: #22263a;
+		border-radius: 16rpx;
+		flex-shrink: 0;
+		margin-right: 20rpx;
+	}
+
+	.skill-option-info {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.skill-option-name {
+		font-size: 28rpx;
+		font-weight: 600;
+		color: #e8eaed;
+		margin-bottom: 4rpx;
+	}
+
+	.skill-option-desc {
+		font-size: 22rpx;
+		color: #9ca3b8;
+		text-overflow: ellipsis;
+		overflow: hidden;
+		white-space: nowrap;
+	}
+
+	/* ===== 输入区域 ===== */
+
+	.input-wrapper {
+		width: 750rpx;
+		background-color: #1a1d28;
+		padding: 8rpx 32rpx 32rpx;
+	}
+
+	.input-container {
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		background-color: #22263a;
+		border: 2rpx solid #33384d;
+		border-radius: 32rpx;
+		padding: 12rpx 16rpx;
+	}
+
+	.input-box {
+		flex: 1;
+		height: 80rpx;
+		font-size: 30rpx;
+		color: #e8eaed;
+		padding-left: 20rpx;
+	}
+
+	.input-placeholder {
+		color: #9ca3b8;
+	}
+
+	.send-btn {
+		width: 80rpx;
+		height: 80rpx;
+		border-radius: 20rpx;
+		background-color: #383d54;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+	}
+
+	.send-btn.active {
+		background: linear-gradient(135deg, #6366f1, #8b5cf6);
+	}
+
+	.send-arrow {
+		font-size: 36rpx;
+		color: #ffffff;
+	}
+
+	.input-hint {
+		font-size: 24rpx;
+		color: #9ca3b8;
+		margin-top: 16rpx;
+		text-align: center;
+		width: 686rpx;
+	}
+</style>
