@@ -32,11 +32,29 @@ jobs:
 
       - name: Download iOS SDK
         if: steps.cache-sdk.outputs.cache-hit != 'true'
+        timeout-minutes: 20
         run: |
           set -e
-          SDK_URL="https://web-ext-storage.dcloud.net.cn/uni-app-x/sdk/iOS/UniAppX-iOS%405.07.zip"
-          echo "Downloading SDK (~200MB)..."
-          curl -L -o /tmp/sdk.zip "$SDK_URL"
+          # 多源下载：主 CDN + 备用
+          URLS=(
+            "https://web-ext-storage.dcloud.net.cn/uni-app-x/sdk/iOS/UniAppX-iOS%405.07.zip"
+            "https://download1.dcloud.net.cn/uni-app-x/sdk/iOS/UniAppX-iOS%405.07.zip"
+          )
+          OK=0
+          for URL in "${URLS[@]}"; do
+            echo "Trying: $URL"
+            if curl -fSL --retry 3 --retry-delay 10 --connect-timeout 30 -o /tmp/sdk.zip "$URL"; then
+              echo "Download OK (size: $(ls -lh /tmp/sdk.zip | awk '{print $5}'))"
+              OK=1
+              break
+            fi
+            echo "Failed, trying next..."
+            rm -f /tmp/sdk.zip
+          done
+          if [ "$OK" != "1" ]; then
+            echo "All download sources failed!"
+            exit 1
+          fi
           echo "Extracting..."
           unzip -q /tmp/sdk.zip -d native-ios/SDK
           rm /tmp/sdk.zip
