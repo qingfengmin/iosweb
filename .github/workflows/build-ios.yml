@@ -87,65 +87,69 @@ jobs:
           set -e
           cd native-ios
 
-          # 发现所有 xcframework 路径（排除 __MACOSX 垃圾）
           echo "Discovering frameworks..."
           FW_PATHS=$(find SDK -name "*.xcframework" -maxdepth 6 -type d ! -path "*/__MACOSX/*" ! -path "*/_MACOSX/*" | sort)
           echo "Found:"
           echo "$FW_PATHS"
 
-          # 生成依赖声明
-          FW_DEPS=""
-          EMBED_FWS=""
-          for fw in $FW_PATHS; do
-            FW_NAME=$(basename "$fw" .xcframework)
-            FW_DEPS="$FW_DEPS
-            - framework: $fw
-              embed: true"
-          done
+          python3 - "$FW_PATHS" <<'PYEOF'
+          import os, sys
 
-          # 写 project.yml
-          cat > project.yml << YMLEND
-          name: UniAppShell
-          options:
-            bundleIdPrefix: com.qingfeng
-            deploymentTarget:
-              iOS: "12.0"
-          targets:
-            UniAppShell:
-              type: application
-              platform: iOS
-              sources:
-                - UniAppShell
-              settings:
-                base:
-                  INFOPLIST_FILE: UniAppShell/Info.plist
-                  PRODUCT_BUNDLE_IDENTIFIER: com.qingfeng.iosweb
-                  OTHER_LINKER_FLAGS: "-ObjC -ld_classic -weak_framework SwiftUI"
-                  FRAMEWORK_SEARCH_PATHS: "\$(SRCROOT)/SDK/Libs \$(SRCROOT)/SDK/SDK/Libs"
-                  ENABLE_USER_SCRIPT_SANDBOXING: NO
-                  CODE_SIGN_IDENTITY: ""
-                  CODE_SIGNING_REQUIRED: "NO"
-                  CODE_SIGNING_ALLOWED: "NO"
-              dependencies:$FW_DEPS
-                - sdk: JavaScriptCore.framework
-                - sdk: libc++.tbd
-              preBuildScripts:
-                - name: "Copy uni-app x Resources"
-                  script: |
-                    set -e
-                    RES_SRC="\${SRCROOT}/../../unpackage/resources/app-ios/__UNI__447C18F"
-                    DST="\${BUILT_PRODUCTS_DIR}/\${PRODUCT_NAME}.app/uni-app-x/apps/__UNI__447C18F"
-                    mkdir -p "\${DST}"
-                    cp -R "\${RES_SRC}/www/" "\${DST}/"
-                    echo "Resources copied to \${DST}"
-          YMLEND
+          fw_paths = sys.argv[1].strip().split('\n') if sys.argv[1].strip() else []
+
+          deps = []
+          for fw in fw_paths:
+              deps.append(f'      - framework: {fw}')
+              deps.append(f'        embed: true')
+
+          fw_deps_yaml = '\n'.join(deps)
+
+          yml = f"""name: UniAppShell
+options:
+  bundleIdPrefix: com.qingfeng
+  deploymentTarget:
+    iOS: "12.0"
+targets:
+  UniAppShell:
+    type: application
+    platform: iOS
+    sources:
+      - UniAppShell
+    settings:
+      base:
+        INFOPLIST_FILE: UniAppShell/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.qingfeng.iosweb
+        OTHER_LINKER_FLAGS: "-ObjC -ld_classic -weak_framework SwiftUI"
+        FRAMEWORK_SEARCH_PATHS: "$(SRCROOT)/SDK/Libs $(SRCROOT)/SDK/SDK/Libs"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        CODE_SIGN_IDENTITY: ""
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGNING_ALLOWED: "NO"
+    dependencies:
+{fw_deps_yaml}
+      - sdk: JavaScriptCore.framework
+      - sdk: libc++.tbd
+    preBuildScripts:
+      - name: "Copy uni-app x Resources"
+        script: |
+          set -e
+          RES_SRC="${{SRCROOT}}/../../unpackage/resources/app-ios/__UNI__447C18F"
+          DST="${{BUILT_PRODUCTS_DIR}}/${{PRODUCT_NAME}}.app/uni-app-x/apps/__UNI__447C18F"
+          mkdir -p "${{DST}}"
+          cp -R "${{RES_SRC}}/www/" "${{DST}}/"
+          echo "Resources copied to ${{DST}}"
+"""
+
+          with open('project.yml', 'w') as f:
+              f.write(yml)
+          print("project.yml written")
+          PYEOF
 
           echo ""
           echo "=== Generated project.yml ==="
           cat project.yml
           echo ""
 
-          # 生成 Xcode 工程
           xcodegen generate
           echo "Xcode project generated"
           ls -la UniAppShell.xcodeproj/
