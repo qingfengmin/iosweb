@@ -24,7 +24,7 @@ targets:
       base:
         INFOPLIST_FILE: UniAppShell/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.qingfeng.iosweb
-        OTHER_LINKER_FLAGS: "-ObjC -ld_classic -weak_framework SwiftUI"
+        OTHER_LINKER_FLAGS: "-ObjC -weak_framework SwiftUI"
         FRAMEWORK_SEARCH_PATHS: "$(SRCROOT)/SDK/Libs $(SRCROOT)/SDK/SDK/Libs"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         CODE_SIGN_IDENTITY: ""
