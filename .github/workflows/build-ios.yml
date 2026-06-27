@@ -57,6 +57,10 @@ jobs:
           fi
           echo "Extracting..."
           unzip -q /tmp/sdk.zip -d native-ios/SDK
+          # 清理 macOS zip 元数据文件夹（这些不是真实框架，会导致编译报错）
+          rm -rf native-ios/SDK/__MACOSX native-ios/SDK/_MACOSX 2>/dev/null || true
+          # 删除所有 ._ 开头的隐藏文件（macOS 资源分支）
+          find native-ios/SDK -name "._*" -delete 2>/dev/null || true
           rm /tmp/sdk.zip
           echo "SDK extracted"
 
@@ -77,9 +81,9 @@ jobs:
           set -e
           cd native-ios
 
-          # 发现所有 xcframework 路径
+          # 发现所有 xcframework 路径（排除 __MACOSX 垃圾）
           echo "Discovering frameworks..."
-          FW_PATHS=$(find SDK -name "*.xcframework" -maxdepth 5 -type d | sort)
+          FW_PATHS=$(find SDK -name "*.xcframework" -maxdepth 6 -type d ! -path "*/__MACOSX/*" ! -path "*/_MACOSX/*" | sort)
           echo "Found:"
           echo "$FW_PATHS"
 
@@ -111,7 +115,7 @@ jobs:
                   INFOPLIST_FILE: UniAppShell/Info.plist
                   PRODUCT_BUNDLE_IDENTIFIER: com.qingfeng.iosweb
                   OTHER_LINKER_FLAGS: "-ObjC -ld_classic -weak_framework SwiftUI"
-                  FRAMEWORK_SEARCH_PATHS: "\$(SRCROOT)/SDK/Libs"
+                  FRAMEWORK_SEARCH_PATHS: "\$(SRCROOT)/SDK/Libs \$(SRCROOT)/SDK/SDK/Libs"
                   ENABLE_USER_SCRIPT_SANDBOXING: NO
                   CODE_SIGN_IDENTITY: ""
                   CODE_SIGNING_REQUIRED: "NO"
