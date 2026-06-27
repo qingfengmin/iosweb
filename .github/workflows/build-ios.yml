@@ -77,6 +77,13 @@ jobs:
           echo "=== xcodeproj in SDK ==="
           find native-ios/SDK -name "*.xcodeproj" 2>/dev/null || echo "(none)"
 
+      # ---- 1.5 清除 SDK 框架签名（Xcode 16+ 会验证签名） ----
+      - name: Strip Framework Signatures
+        run: |
+          echo "Stripping _CodeSignature from all xcframeworks..."
+          find native-ios/SDK -name "_CodeSignature" -type d -exec rm -rf {} + 2>/dev/null || true
+          echo "Done stripping signatures"
+
       # ---- 2. 安装 xcodegen ----
       - name: Install xcodegen
         run: brew install xcodegen
@@ -123,6 +130,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_VERIFY_FRAMEWORKS=NO \
             ONLY_ACTIVE_ARCH=NO \
             build 2>&1 | tee /tmp/build.log
 
