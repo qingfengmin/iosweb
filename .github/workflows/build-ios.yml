@@ -91,7 +91,8 @@ jobs:
           FW_PATHS=$(find SDK -name "*.xcframework" -maxdepth 6 -type d \
             ! -path "*/__MACOSX/*" ! -path "*/_MACOSX/*" \
             ! -path "*/UniAppXDemo/*" \
-            ! -path "*/TemporarySampleFramework/*" | sort)
+            ! -path "*/TemporarySampleFramework/*" \
+            ! -path "*/BURelyFoundation_Global.xcframework" | sort)
           echo "Found:"
           echo "$FW_PATHS"
 
