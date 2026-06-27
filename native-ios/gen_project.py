@@ -38,7 +38,7 @@ FW_DEPS_PLACEHOLDER
       - name: "Copy uni-app x Resources"
         script: |
           set -e
-          RES_SRC="${SRCROOT}/../../unpackage/resources/app-ios/__UNI__447C18F"
+          RES_SRC="${SRCROOT}/../unpackage/resources/app-ios/__UNI__447C18F"
           DST="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/uni-app-x/apps/__UNI__447C18F"
           mkdir -p "${DST}"
           cp -R "${RES_SRC}/www/" "${DST}/"
