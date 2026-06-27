@@ -39,7 +39,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
-        return UniAppXSDK.applicationOpenURLOptions(app, url, options)
+        UniAppXSDK.applicationOpenURLOptions(app, url, options)
+        return true
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
@@ -59,6 +60,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
-        return UniAppXSDK.applicationContinueUserActivityRestorationHandler(application, userActivity, restorationHandler)
+        UniAppXSDK.applicationContinueUserActivityRestorationHandler(application, userActivity, restorationHandler)
+        return true
     }
 }
