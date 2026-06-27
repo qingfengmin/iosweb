@@ -72,6 +72,7 @@ targets:
         CODE_SIGN_IDENTITY: ""
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGNING_ALLOWED: "NO"
+        VALIDATE_PRODUCT: "NO"
     dependencies:
 FW_DEPS_PLACEHOLDER
       - sdk: JavaScriptCore.framework
