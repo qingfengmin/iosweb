@@ -1,4 +1,7 @@
 node_modules/
-unpackage/
 .hbuilderx/
 .DS_Store
+# 只忽略编译缓存，保留离线打包资源
+unpackage/cache/
+unpackage/debug/
+unpackage/dist/

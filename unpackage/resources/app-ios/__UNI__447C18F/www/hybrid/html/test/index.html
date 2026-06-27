@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebView Test</title>
+  <style>
+    body { margin:0; padding:20px; background:#1a1a2e; color:#fff; font-family:sans-serif; }
+    .card { background:#16213e; padding:20px; border-radius:12px; margin:10px 0; }
+    button { background:#0f3460; color:#fff; border:none; padding:12px 24px; border-radius:8px; font-size:16px; margin:4px; }
+    .success { color:#4caf50; }
+    .error { color:#f44336; }
+  </style>
+</head>
+<body>
+  <h2>WebView 加载测试</h2>
+  <div class="card">
+    <p>✅ HTML 加载成功</p>
+    <p>✅ CSS 样式生效</p>
+    <p id="js-test">⏳ 等待 JS 执行...</p>
+    <button onclick="testClick()">点击测试</button>
+  </div>
+
+  <script>
+    document.getElementById('js-test').textContent = '✅ JS 执行成功';
+    document.getElementById('js-test').className = 'success';
+
+    function testClick() {
+      alert('按钮点击成功！webview 交互正常');
+    }
+
+    var apiBase = new URLSearchParams(window.location.search).get('apiBase') || '';
+    console.log('API Base:', apiBase);
+  </script>
+</body>
+</html>

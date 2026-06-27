@@ -1,0 +1,28 @@
+{
+  "id": "__UNI__447C18F",
+  "name": "iosweb",
+  "description": "",
+  "version": {
+    "name": "1.0.0",
+    "code": "100"
+  },
+  "uni-app-x": {
+    "compilerVersion": "5.07"
+  },
+  "app-ios": {
+    "distribute": {
+      "idfa": false,
+      "modules": {
+        "uni-keyboard": {},
+        "uni-network": {},
+        "uni-prompt": {}
+      },
+      "icons": {},
+      "splashScreens": {}
+    },
+    "modules": {},
+    "ios": {
+      "dSYMs": false
+    }
+  }
+}
