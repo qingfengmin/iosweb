@@ -88,7 +88,10 @@ jobs:
           cd native-ios
 
           echo "Discovering frameworks..."
-          FW_PATHS=$(find SDK -name "*.xcframework" -maxdepth 6 -type d ! -path "*/__MACOSX/*" ! -path "*/_MACOSX/*" | sort)
+          FW_PATHS=$(find SDK -name "*.xcframework" -maxdepth 6 -type d \
+            ! -path "*/__MACOSX/*" ! -path "*/_MACOSX/*" \
+            ! -path "*/UniAppXDemo/*" \
+            ! -path "*/TemporarySampleFramework/*" | sort)
           echo "Found:"
           echo "$FW_PATHS"
 
